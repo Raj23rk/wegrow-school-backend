@@ -2,30 +2,31 @@
   "name": "school-portal-backend",
   "version": "1.0.0",
   "description": "School Student Portal API powered by Hono, MongoDB, Supabase, Nodemailer, WhatsApp & Razorpay",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "tsc"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@supabase/supabase-js": "^2.46.1",
+    "@types/node": "^22.9.0",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
     "hono": "^4.6.12",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.8.2",
     "nodemailer": "^6.9.16",
-    "razorpay": "^2.9.5"
+    "razorpay": "^2.9.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.7",
-    "@types/node": "^22.9.0",
-    "@types/nodemailer": "^6.4.16",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "@types/nodemailer": "^6.4.16"
   }
 }
