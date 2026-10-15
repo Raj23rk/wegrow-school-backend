@@ -8,6 +8,7 @@ import { isMongoConnected } from '../db/mongo.js';
 import {
   sendDirectWhatsAppMessage,
   sendDirectEmailMessage,
+  sendWhatsAppTemplate,
 } from '../services/notificationService.js';
 
 export const adminRouter = new Hono();
@@ -86,48 +87,66 @@ const BATCH_ATTENDANCE_STORE: Record<string, any[]> = {};
 // In-memory Notification Templates Store
 let NOTIFICATION_TEMPLATES: any[] = [
   {
+    id: 'tmpl_credentials',
+    title: 'Student Portal Login Credentials (Username & Password)',
+    category: 'Credentials',
+    channel: 'both',
+    subject: 'Student Portal Login Credentials - {studentName} | WeGrow Campus',
+    templateBody: '🎓 *WeGrow Skill Campus - Student Portal Login Credentials*\n\nDear {fatherName} & {studentName},\n\nWelcome to WeGrow Skill Campus! Your Student Learning Portal account has been activated.\n\n🔑 *Login Credentials:*\n• *Student Name:* {studentName}\n• *Username / Roll No:* {username}\n• *Password:* {password}\n• *Email:* {email}\n• *Batch / Course:* {className}\n\n🌐 *Portal Login Link:*\nhttps://school.wegrowbschool.in/#login\n\n💡 *Quick Steps:*\n1. Click the portal link above\n2. Enter Username ({username}) & Password ({password})\n3. Access interactive AI labs, daily notes, video lectures, and live attendance.\n\nPlease keep your credentials safe.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'tmpl_fee_receipt',
+    title: 'Fee Payment Receipt & Login Access',
+    category: 'Fees',
+    channel: 'both',
+    subject: 'Fee Payment Receipt: {studentName} | WeGrow Skill Campus',
+    templateBody: '💳 *WeGrow Skill Campus - Fee Payment Receipt*\n\nDear {fatherName},\n\nWe acknowledge receipt of fee payment for {studentName} ({rollNumber}).\n\n💰 *Fee Summary:*\n• *Course:* {className}\n• *Total Course Fee:* INR ₹{totalFees}\n• *Amount Paid:* INR ₹{paidFees}\n• *Pending Balance Due:* INR ₹{dueFees}\n\n🔑 *Student Portal Login:*\n• *Username:* {username}\n• *Password:* {password}\n• *Portal URL:* https://school.wegrowbschool.in/#login\n\nThank you for choosing WeGrow Skill Campus.',
+    createdAt: new Date().toISOString(),
+  },
+  {
     id: 'tmpl_01',
     title: 'Daily Attendance Absence Alert',
-    category: 'attendance',
+    category: 'Attendance',
     channel: 'both',
     subject: 'Urgent: Student Attendance Alert - WeGrow Sivakasi Campus',
-    templateBody: `Dear {parentName},\n\nThis is an official notice that your ward {studentName} ({className}) from {schoolName} was marked ABSENT today ({date}) without prior approved leave.\n\nPlease verify and contact campus security/helpdesk if this is an error.\n\nRegards,\nWeGrow Campus Administration`,
+    templateBody: 'Dear {fatherName} & {motherName},\n\nThis is an official notice that your ward {studentName} ({className}) from {schoolName} was marked ABSENT today ({date}) without prior approved leave.\n\nPlease verify with campus administration.',
     createdAt: new Date().toISOString(),
   },
   {
     id: 'tmpl_02',
     title: 'Tuition Fee Due & Razorpay Settlement Link',
-    category: 'finance',
+    category: 'Fees',
     channel: 'both',
     subject: 'Tuition Fee Settlement Reminder - WeGrow Skill Campus',
-    templateBody: `Dear {parentName},\n\nGentle reminder: The academic term fee for {studentName} ({className}) has a pending balance of INR {dueFees}.\n\nPlease complete online settlement via Razorpay UPI in the Student Portal:\nhttps://wegrowskillcampus.edu/portal\n\nThank you for supporting your child's tech education!\nWeGrow Finance Office`,
+    templateBody: 'Dear {fatherName},\n\nGentle reminder: The academic term fee for {studentName} ({className}) has a pending balance of INR ₹{dueFees}.\n\nPlease complete online settlement via Razorpay UPI in the Student Portal.',
     createdAt: new Date().toISOString(),
   },
   {
     id: 'tmpl_03',
     title: 'Academic Achievement & Diagnostic Test Release',
-    category: 'academic',
+    category: 'Academic',
     channel: 'both',
     subject: 'Academic Milestone: Diagnostic Evaluation Scores Released',
-    templateBody: `Dear {parentName},\n\nWe are pleased to inform you that recent hands-on AI & Robotics evaluation results for {studentName} are now published.\n\nYour ward scored commendably in the latest practical lab assessment. Full scorecard & instructor feedback are accessible on the portal.\n\nWarm regards,\nAcademic Director, WeGrow Sivakasi`,
+    templateBody: 'Dear Parents, We are pleased to inform you that recent hands-on AI & Robotics evaluation results for {studentName} ({className}) are now published. Full scorecard & instructor feedback are accessible on portal.',
     createdAt: new Date().toISOString(),
   },
   {
     id: 'tmpl_04',
     title: 'Parent-Teacher Meeting (PTM) Invitation',
-    category: 'general',
+    category: 'PTM',
     channel: 'both',
-    subject: 'Invitation: Parent-Teacher Interactive Conclave',
-    templateBody: `Dear Mr. {fatherName} & Mrs. {motherName},\n\nYou are cordially invited to our Upcoming Term Conclave on Saturday to review {studentName}'s coding and robotics project progress.\n\nVenue: WeGrow Skill Campus Lab, Sivakasi.\nTime slots available on the student portal.\n\nWe look forward to meeting you!`,
+    subject: 'PTM Scheduled at WeGrow Campus',
+    templateBody: 'Dear {fatherName} & {motherName}, WeGrow Campus cordially invites you to the upcoming Parent-Teacher Conference this Saturday at 10:30 AM to discuss {studentName}\'s academic development.',
     createdAt: new Date().toISOString(),
   },
   {
     id: 'tmpl_05',
-    title: 'Special Holiday & Lab Schedule Update',
-    category: 'general',
-    channel: 'whatsapp',
-    subject: 'Campus Schedule & Lab Timings Circular',
-    templateBody: `Notice to Parents:\nCampus practical robotics lab sessions for {studentName} ({className}) will follow the festive weekend schedule on {date}.\n\nOnline doubt clearance will remain active 24/7 on the student portal.`,
+    title: 'Campus Holiday Announcement',
+    category: 'Notice',
+    channel: 'both',
+    subject: 'Campus Holiday Announcement | WeGrow Skill Campus',
+    templateBody: 'Attention Parents of {studentName}: WeGrow Campus will remain closed on {date} on account of Institutional Festival. Online coding labs remain open 24/7.',
     createdAt: new Date().toISOString(),
   },
 ];
@@ -139,16 +158,33 @@ function interpolateTemplate(template: string, student: any): string {
     month: 'short',
     year: 'numeric',
   });
+  const username = student.rollNumber || student.email || 'student';
+  const password = student.password || `${student.rollNumber || 'WG26-001'}@2026`;
+  const fatherName = student.fatherName || student.parentName || 'Parent';
+  const motherName = student.motherName || 'Parent';
+  const parentName = student.parentName || fatherName || 'Parent';
+  const totalFees = (student.totalFees || 45000).toLocaleString('en-IN');
+  const paidFees = (student.paidFees || 0).toLocaleString('en-IN');
+  const dueFees = (student.dueFees !== undefined
+    ? student.dueFees
+    : Math.max(0, (student.totalFees || 45000) - (student.paidFees || 0))
+  ).toLocaleString('en-IN');
+
   return template
     .replace(/{studentName}/g, student.name || 'Student')
-    .replace(/{parentName}/g, student.parentName || student.fatherName || 'Parent')
-    .replace(/{fatherName}/g, student.fatherName || student.parentName || 'Father')
-    .replace(/{motherName}/g, student.motherName || 'Mother')
+    .replace(/{parentName}/g, parentName)
+    .replace(/{fatherName}/g, fatherName)
+    .replace(/{motherName}/g, motherName)
+    .replace(/{username}/g, username)
+    .replace(/{password}/g, password)
+    .replace(/{email}/g, student.email || '')
     .replace(/{className}/g, student.grade || student.batch || 'Program')
     .replace(/{batch}/g, student.batch || 'Cohort')
     .replace(/{schoolName}/g, student.schoolName || 'WeGrow Partner School')
     .replace(/{rollNumber}/g, student.rollNumber || '')
-    .replace(/{dueFees}/g, (student.dueFees || 0).toLocaleString('en-IN'))
+    .replace(/{totalFees}/g, totalFees)
+    .replace(/{paidFees}/g, paidFees)
+    .replace(/{dueFees}/g, dueFees)
     .replace(/{date}/g, today);
 }
 
@@ -404,16 +440,41 @@ adminRouter.post('/students/:id/notify', async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { channel = 'both', messageType = 'custom', customMessage, subject } = body;
+    const {
+      channel = 'both',
+      messageType = 'custom',
+      templateId,
+      customMessage,
+      subject,
+      template,
+      templateParams,
+    } = body;
 
     const student = ADMIN_STUDENTS.find((s) => s.id === id || s._id === id);
     if (!student) {
       return c.json({ success: false, message: 'Student not found' }, 404);
     }
 
-    const textToSend =
-      customMessage ||
-      `Notice regarding ${student.name} (${student.grade}) at ${student.schoolName}. Please check the student portal for latest attendance and notes.`;
+    let templateToUse = customMessage || '';
+    let subjectToUse = subject || '';
+
+    if (templateId) {
+      const found = NOTIFICATION_TEMPLATES.find((t) => t.id === templateId);
+      if (found) {
+        templateToUse = templateToUse || found.templateBody;
+        subjectToUse = subjectToUse || found.subject;
+      }
+    }
+
+    if (!templateToUse) {
+      templateToUse = `Notice regarding {studentName} ({className}) at {schoolName}. Please check the student portal for latest attendance and notes.`;
+    }
+
+    const textToSend = interpolateTemplate(templateToUse, student);
+    const finalSubject = interpolateTemplate(
+      subjectToUse || `Academic Notice regarding {studentName} - WeGrow Campus`,
+      student
+    );
 
     const results: any = {};
 
@@ -422,12 +483,30 @@ adminRouter.post('/students/:id/notify', async (c) => {
       const targetPhone =
         student.fatherPhone || student.parentWhatsApp || student.motherPhone;
       if (targetPhone) {
-        const waRes = await sendDirectWhatsAppMessage({
-          phone: targetPhone,
-          recipientName: student.parentName || student.fatherName || 'Parent',
-          studentName: student.name,
-          messageText: `📢 *WeGrow Skill Campus Notice*\nDear *${student.parentName}* (Parent of *${student.name}*):\n\n${textToSend}\n\nSchool: ${student.schoolName}\nRoll No: ${student.rollNumber}`,
-        });
+        let waRes: any;
+        if (template) {
+          // Use official Meta WhatsApp approved template for guaranteed delivery outside 24h window
+          waRes = await sendWhatsAppTemplate({
+            contact: targetPhone,
+            template,
+            params:
+              templateParams && templateParams.length > 0
+                ? templateParams
+                : [
+                    student.name || 'Student',
+                    student.schoolName || 'Sivakasi',
+                    student.grade || 'Tech Program',
+                  ],
+          });
+        } else {
+          // Send custom text message
+          waRes = await sendDirectWhatsAppMessage({
+            phone: targetPhone,
+            recipientName: student.parentName || student.fatherName || 'Parent',
+            studentName: student.name,
+            messageText: textToSend,
+          });
+        }
         results.whatsapp = waRes;
       }
     }
@@ -438,7 +517,7 @@ adminRouter.post('/students/:id/notify', async (c) => {
       if (targetEmail) {
         const emailRes = await sendDirectEmailMessage({
           toEmail: targetEmail,
-          subject: subject || `Academic Notice regarding ${student.name} - WeGrow Campus`,
+          subject: finalSubject,
           recipientName: student.parentName || student.fatherName || 'Parent',
           studentName: student.name,
           bodyText: textToSend,
@@ -463,6 +542,30 @@ adminRouter.get('/notification-templates', (c) => {
     success: true,
     data: NOTIFICATION_TEMPLATES,
   });
+});
+
+// Live Approved Meta WhatsApp Templates from MyDreams Technology
+adminRouter.get('/whatsapp-templates', async (c) => {
+  try {
+    const url = `${(ENV.MYDREAMS_WA_URL || 'https://wa.mydreamstechnology.in/').replace(
+      /\/$/,
+      ''
+    )}/api/gettemplates.php?LicenseNumber=${encodeURIComponent(
+      ENV.MYDREAMS_WA_LICENSE
+    )}&APIKey=${encodeURIComponent(ENV.MYDREAMS_WA_API_KEY)}`;
+
+    const res = await fetch(url);
+    const json = (await res.json()) as any;
+    const templates = json?.Data?.waba_templates || [];
+
+    return c.json({
+      success: true,
+      count: templates.length,
+      templates,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, message: err.message }, 500);
+  }
 });
 
 adminRouter.post('/notification-templates', async (c) => {
