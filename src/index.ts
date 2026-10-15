@@ -17,22 +17,67 @@ import { notificationsRouter } from './routes/notifications.js';
 
 const app = new Hono();
 
+const ALLOWED_ORIGINS = [
+  'https://school.wegrowbschool.in',
+  'http://school.wegrowbschool.in',
+  'https://www.school.wegrowbschool.in',
+  'http://www.school.wegrowbschool.in',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+];
+
 // Middlewares
 app.use('*', logger());
 app.use(
   '*',
   cors({
-    origin: '*',
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    origin: (origin) => {
+      if (!origin) return '*';
+      if (
+        ALLOWED_ORIGINS.includes(origin) ||
+        origin.endsWith('.wegrowbschool.in') ||
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:')
+      ) {
+        return origin;
+      }
+      return origin; // dynamically reflect origin so credentials work seamlessly
+    },
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Access-Control-Request-Headers',
+      'Access-Control-Request-Method',
+    ],
+    credentials: true,
+    maxAge: 86400,
   })
 );
 
-// Health check endpoint
+// Global OPTIONS preflight handler
+app.options('*', (c) => c.body(null, 204));
+
+// Root welcome & health endpoints
+app.get('/', (c) => {
+  return c.json({
+    status: 'ok',
+    system: 'WeGrow School Backend API',
+    timestamp: new Date().toISOString(),
+    environment: ENV.NODE_ENV,
+  });
+});
+
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    system: 'EduPulse Hono Backend API',
+    system: 'WeGrow School Backend API',
     timestamp: new Date().toISOString(),
     environment: ENV.NODE_ENV,
   });
