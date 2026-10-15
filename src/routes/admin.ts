@@ -837,6 +837,171 @@ adminRouter.post('/attendance/mark', async (c) => {
   }
 });
 
+// 8.1 Date-Wise Daily Attendance Count & Analytics
+async function getDailyAttendanceAnalytics(c: any) {
+  try {
+    const targetDate = c.req.query('date'); // optional: 'YYYY-MM-DD'
+    const targetBatch = c.req.query('batch'); // optional: filter by batch
+    const limitDays = Math.min(Number(c.req.query('days')) || 30, 90);
+
+    const allStudents = await getActiveStudents();
+    const filteredStudents = targetBatch
+      ? allStudents.filter(
+          (s) => (s.batch || '').toLowerCase() === targetBatch.toLowerCase()
+        )
+      : allStudents;
+
+    const totalEnrolled = filteredStudents.length;
+
+    // 1. Fetch DB attendance records
+    let dbRecords: any[] = [];
+    if (isMongoConnected()) {
+      try {
+        const query: any = {};
+        if (targetDate) {
+          query.date = targetDate;
+        }
+        dbRecords = await AttendanceModel.find(query).sort({ date: -1 });
+      } catch (err: any) {
+        console.warn('Daily attendance DB query warning:', err.message);
+      }
+    }
+
+    // 2. Collect all distinct dates
+    const datesSet = new Set<string>();
+    const todayStr = new Date().toISOString().split('T')[0];
+    datesSet.add(todayStr);
+
+    if (targetDate) {
+      datesSet.clear();
+      datesSet.add(targetDate);
+    } else {
+      // From DB
+      for (const rec of dbRecords) {
+        if (rec.date) datesSet.add(rec.date);
+      }
+      // From BATCH_ATTENDANCE_STORE
+      for (const key of Object.keys(BATCH_ATTENDANCE_STORE)) {
+        const parts = key.split('_');
+        const keyDate = parts[parts.length - 1];
+        if (keyDate && keyDate.length === 10) {
+          datesSet.add(keyDate);
+        }
+      }
+    }
+
+    // Sort dates descending
+    const sortedDates = Array.from(datesSet)
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, limitDays);
+
+    // 3. Build Date-wise report
+    const dateWiseReports = sortedDates.map((d) => {
+      let presentCount = 0;
+      let absentCount = 0;
+      let lateCount = 0;
+      let excusedCount = 0;
+
+      const studentRecords = filteredStudents.map((s) => {
+        const sId = (s.id || s._id || '').toString();
+
+        // 1. Check in DB records
+        let existing = dbRecords.find(
+          (r) =>
+            (r.studentId === sId || r.studentId === s.rollNumber) && r.date === d
+        );
+
+        // 2. Check in in-memory BATCH_ATTENDANCE_STORE
+        if (!existing) {
+          for (const [k, records] of Object.entries(BATCH_ATTENDANCE_STORE)) {
+            if (k.endsWith(d) && Array.isArray(records)) {
+              const memFound = records.find(
+                (r: any) =>
+                  r.studentId === sId || r.rollNumber === s.rollNumber
+              );
+              if (memFound) {
+                existing = memFound;
+                break;
+              }
+            }
+          }
+        }
+
+        const status = existing ? existing.status : 'present';
+        const remarks =
+          existing?.remarks ||
+          (status === 'present' ? 'Present in class' : 'Absent');
+
+        if (status === 'present') presentCount++;
+        else if (status === 'absent') absentCount++;
+        else if (status === 'late') lateCount++;
+        else if (status === 'excused') excusedCount++;
+        else presentCount++;
+
+        return {
+          studentId: sId,
+          name: s.name,
+          rollNumber: s.rollNumber,
+          grade: s.grade,
+          batch: s.batch,
+          schoolName: s.schoolName,
+          status,
+          remarks,
+        };
+      });
+
+      const effectiveTotal = studentRecords.length;
+      const attendancePercentage =
+        effectiveTotal > 0
+          ? Math.round((presentCount / effectiveTotal) * 100)
+          : 0;
+
+      return {
+        date: d,
+        totalStudents: effectiveTotal,
+        presentCount,
+        absentCount,
+        lateCount,
+        excusedCount,
+        attendancePercentage,
+        students: studentRecords,
+      };
+    });
+
+    // Summary calculation for today
+    const todayReport = dateWiseReports.find((r) => r.date === todayStr) || {
+      date: todayStr,
+      totalStudents: totalEnrolled,
+      presentCount: totalEnrolled,
+      absentCount: 0,
+      lateCount: 0,
+      excusedCount: 0,
+      attendancePercentage: 100,
+    };
+
+    return c.json({
+      success: true,
+      summary: {
+        totalEnrolled,
+        todayDate: todayStr,
+        todayPresent: todayReport.presentCount,
+        todayAbsent: todayReport.absentCount,
+        todayLate: todayReport.lateCount,
+        todayExcused: todayReport.excusedCount,
+        todayPercentage: todayReport.attendancePercentage,
+      },
+      count: dateWiseReports.length,
+      data: dateWiseReports,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, message: err.message }, 500);
+  }
+}
+
+adminRouter.get('/attendance/daily-stats', getDailyAttendanceAnalytics);
+adminRouter.get('/attendance/date-wise', getDailyAttendanceAnalytics);
+adminRouter.get('/attendance/daily-count', getDailyAttendanceAnalytics);
+
 // 9. Record Manual Fee Payment
 adminRouter.post('/record-payment', async (c) => {
   try {
