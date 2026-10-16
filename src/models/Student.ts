@@ -22,6 +22,12 @@ export interface IStudent extends Document {
   parentWhatsApp: string;
   bloodGroup: string;
   enrollmentDate: string;
+  feeType?: string;
+  feePaymentPlan?: string;
+  feePlanLabel?: string;
+  installmentCount?: number;
+  installmentAmount?: number;
+  installments?: any[];
   totalFees: number;
   paidFees: number;
   dueFees: number;
@@ -50,9 +56,15 @@ const StudentSchema = new Schema<IStudent>({
   parentWhatsApp: { type: String, required: true },
   bloodGroup: { type: String, default: 'O+' },
   enrollmentDate: { type: String, default: '2024-06-01' },
+  feeType: { type: String, default: 'term' },
+  feePaymentPlan: { type: String, default: 'term_payment' },
+  feePlanLabel: { type: String, default: '3. Term Payment - ₹45,000 (3 Terms x ₹15,000)' },
+  installmentCount: { type: Number, default: 3 },
+  installmentAmount: { type: Number, default: 15000 },
+  installments: { type: Schema.Types.Mixed, default: [] },
   totalFees: { type: Number, default: 45000 },
-  paidFees: { type: Number, default: 30000 },
-  dueFees: { type: Number, default: 15000 },
+  paidFees: { type: Number, default: 0 },
+  dueFees: { type: Number, default: 45000 },
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -10,6 +10,7 @@ import {
   verifyAdminPassword,
   toAdminResponseUser,
 } from '../data/adminUsers.js';
+import { resolveStudentFeeDetails, getNextDueInstallment } from '../services/feeService.js';
 
 export const authRouter = new Hono();
 
@@ -113,6 +114,16 @@ authRouter.post('/login', async (c) => {
       { expiresIn: '7d' }
     );
 
+    const feeDetails = resolveStudentFeeDetails({
+      feeType: student.feeType || student.feePaymentPlan,
+      customTotalFees: student.totalFees,
+      paidFees: student.paidFees || 0,
+    });
+    const studentInstallments = (student.installments && student.installments.length > 0)
+      ? student.installments
+      : feeDetails.installments;
+    const nextDue = getNextDueInstallment(studentInstallments);
+
     const studentSafe = {
       id: studentId,
       _id: studentId,
@@ -130,9 +141,16 @@ authRouter.post('/login', async (c) => {
       parentName: student.parentName || student.fatherName || 'Parent',
       parentEmail: student.parentEmail || student.email,
       parentWhatsApp: student.parentWhatsApp || student.fatherPhone || '+919876543210',
-      totalFees: student.totalFees || 45000,
-      paidFees: student.paidFees || 0,
-      dueFees: student.dueFees !== undefined ? student.dueFees : Math.max(0, (student.totalFees || 45000) - (student.paidFees || 0)),
+      feeType: student.feeType || feeDetails.feeType,
+      feePaymentPlan: student.feePaymentPlan || feeDetails.feePaymentPlan,
+      feePlanLabel: student.feePlanLabel || feeDetails.feePlanLabel,
+      installmentCount: student.installmentCount || feeDetails.installmentCount,
+      installmentAmount: student.installmentAmount || feeDetails.installmentAmount,
+      totalFees: feeDetails.totalFees,
+      paidFees: feeDetails.paidFees,
+      dueFees: feeDetails.dueFees,
+      installments: studentInstallments,
+      nextDueInstallment: nextDue,
     };
 
     return c.json({
@@ -173,6 +191,16 @@ authRouter.get('/me', async (c) => {
     }
 
     const studentId = student._id || student.id || decoded.id;
+    const feeDetails = resolveStudentFeeDetails({
+      feeType: student.feeType || student.feePaymentPlan,
+      customTotalFees: student.totalFees,
+      paidFees: student.paidFees || 0,
+    });
+    const studentInstallments = (student.installments && student.installments.length > 0)
+      ? student.installments
+      : feeDetails.installments;
+    const nextDue = getNextDueInstallment(studentInstallments);
+
     return c.json({
       success: true,
       student: {
@@ -192,9 +220,16 @@ authRouter.get('/me', async (c) => {
         parentName: student.parentName || student.fatherName || 'Parent',
         parentEmail: student.parentEmail || student.email,
         parentWhatsApp: student.parentWhatsApp || student.fatherPhone || '+919876543210',
-        totalFees: student.totalFees || 45000,
-        paidFees: student.paidFees || 0,
-        dueFees: student.dueFees !== undefined ? student.dueFees : Math.max(0, (student.totalFees || 45000) - (student.paidFees || 0)),
+        feeType: student.feeType || feeDetails.feeType,
+        feePaymentPlan: student.feePaymentPlan || feeDetails.feePaymentPlan,
+        feePlanLabel: student.feePlanLabel || feeDetails.feePlanLabel,
+        installmentCount: student.installmentCount || feeDetails.installmentCount,
+        installmentAmount: student.installmentAmount || feeDetails.installmentAmount,
+        totalFees: feeDetails.totalFees,
+        paidFees: feeDetails.paidFees,
+        dueFees: feeDetails.dueFees,
+        installments: studentInstallments,
+        nextDueInstallment: nextDue,
       },
     });
   } catch (err: any) {

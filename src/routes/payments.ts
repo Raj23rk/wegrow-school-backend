@@ -7,6 +7,14 @@ import { StudentModel } from '../models/Student.js';
 import { isMongoConnected } from '../db/mongo.js';
 import { ADMIN_STUDENTS } from './admin.js';
 import { createRazorpayOrder, verifyRazorpaySignature } from '../services/razorpayService.js';
+import {
+  getAllFeePlans,
+  normalizeFeePlanKey,
+  resolveStudentFeeDetails,
+  calculateInstallments,
+  getNextDueInstallment,
+  FEE_PLANS,
+} from '../services/feeService.js';
 
 export const paymentsRouter = new Hono();
 
@@ -66,6 +74,14 @@ async function getStudentFromRequest(c: any): Promise<any> {
   return student;
 }
 
+// Get all Fee Payment Plans (1. Full Payment ₹43,000, 2. Half Payment ₹45,000 split ₹22,500 x 2, 3. Term Payment ₹45,000 / 3 = ₹15,000)
+paymentsRouter.get('/plans', (c) => {
+  return c.json({
+    success: true,
+    data: getAllFeePlans(),
+  });
+});
+
 // Get fee overview & transaction history for the authenticated student
 paymentsRouter.get('/history', async (c) => {
   const student = await getStudentFromRequest(c);
@@ -82,12 +98,19 @@ paymentsRouter.get('/history', async (c) => {
   }
 
   const sId = (student.id || student._id || '').toString();
-  const totalFees = student.totalFees || 45000;
-  const paidFees = student.paidFees || 0;
-  const dueFees =
-    student.dueFees !== undefined
-      ? student.dueFees
-      : Math.max(0, totalFees - paidFees);
+  const feeDetails = resolveStudentFeeDetails({
+    feeType: student.feeType || student.feePaymentPlan,
+    customTotalFees: student.totalFees,
+    paidFees: student.paidFees || 0,
+  });
+
+  const totalFees = feeDetails.totalFees;
+  const paidFees = feeDetails.paidFees;
+  const dueFees = feeDetails.dueFees;
+  const installments = (student.installments && student.installments.length > 0)
+    ? student.installments
+    : feeDetails.installments;
+  const nextDueInstallment = getNextDueInstallment(installments);
 
   // Fetch payments for this student
   let payments: any[] = [];
@@ -117,7 +140,7 @@ paymentsRouter.get('/history', async (c) => {
     );
   }
 
-  // If student has paid fees (e.g. 1000) but no individual transaction record exists, create the receipt
+  // If student has paid fees but no individual transaction record exists, create the receipt
   if (paidFees > 0 && payments.length === 0) {
     const defaultReceipt = {
       _id: `pay_${sId || 'init'}`,
@@ -139,9 +162,16 @@ paymentsRouter.get('/history', async (c) => {
     data: {
       studentId: sId,
       studentName: student.name,
+      feeType: student.feeType || feeDetails.feeType,
+      feePaymentPlan: student.feePaymentPlan || feeDetails.feePaymentPlan,
+      feePlanLabel: student.feePlanLabel || feeDetails.feePlanLabel,
+      installmentCount: student.installmentCount || feeDetails.installmentCount,
+      installmentAmount: student.installmentAmount || feeDetails.installmentAmount,
       totalFees,
       paidFees,
       dueFees,
+      installments,
+      nextDueInstallment,
       payments,
     },
   });
@@ -151,17 +181,30 @@ paymentsRouter.get('/history', async (c) => {
 paymentsRouter.post('/create-order', async (c) => {
   try {
     const body = await c.req.json();
-    const { amount, feeType = 'Term Tuition & Lab Fee' } = body;
-
     const student = (await getStudentFromRequest(c)) || {
       _id: 'std_temp',
       name: 'Student',
       email: 'student@wegrow.edu',
       phone: '+91 98765 43210',
-      dueFees: 0,
+      totalFees: 45000,
+      paidFees: 0,
+      dueFees: 45000,
+      feeType: 'term',
+      installmentAmount: 15000,
     };
 
-    const paymentAmount = Number(amount) || student.dueFees || 15000;
+    const studentInstallments = calculateInstallments(
+      student.feeType || 'term',
+      student.totalFees || 45000,
+      student.paidFees || 0
+    );
+    const nextDue = getNextDueInstallment(studentInstallments);
+
+    const defaultAmount = nextDue ? nextDue.amountDue : (student.installmentAmount || student.dueFees || 15000);
+    const defaultFeeType = nextDue ? nextDue.title : (body.feeType || 'Term Tuition & Lab Fee');
+
+    const paymentAmount = Number(body.amount) || defaultAmount;
+    const feeType = body.feeType || defaultFeeType;
     const receiptId = `RCPT_${Date.now()}`;
 
     const orderData = await createRazorpayOrder(paymentAmount, receiptId, {
@@ -183,6 +226,7 @@ paymentsRouter.post('/create-order', async (c) => {
         studentEmail: student.email,
         studentPhone: student.phone || student.fatherPhone || '+91 98765 43210',
         feeType,
+        nextDueInstallment: nextDue,
       },
     });
   } catch (error: any) {
@@ -246,6 +290,8 @@ paymentsRouter.post('/verify', async (c) => {
 
     let updatedPaid = amountPaid;
     let updatedDue = 0;
+    let updatedInstallments: any[] = [];
+    let nextDue: any = null;
 
     if (student) {
       student.paidFees = (student.paidFees || 0) + amountPaid;
@@ -253,15 +299,26 @@ paymentsRouter.post('/verify', async (c) => {
         0,
         (student.totalFees || 45000) - student.paidFees
       );
+      student.installments = calculateInstallments(
+        student.feeType || 'term',
+        student.totalFees || 45000,
+        student.paidFees
+      );
       updatedPaid = student.paidFees;
       updatedDue = student.dueFees;
+      updatedInstallments = student.installments;
+      nextDue = getNextDueInstallment(updatedInstallments);
 
       if (isMongoConnected()) {
         try {
           await PaymentModel.create(newPaymentRecord);
           await StudentModel.findOneAndUpdate(
             { $or: [{ _id: sId }, { email: student.email }] },
-            { paidFees: student.paidFees, dueFees: student.dueFees }
+            {
+              paidFees: student.paidFees,
+              dueFees: student.dueFees,
+              installments: student.installments,
+            }
           );
         } catch (err: any) {
           console.warn('Payment Mongo record warning:', err.message);
@@ -279,6 +336,8 @@ paymentsRouter.post('/verify', async (c) => {
         paymentId: razorpay_payment_id,
         paidFees: updatedPaid,
         dueFees: updatedDue,
+        installments: updatedInstallments,
+        nextDueInstallment: nextDue,
       },
     });
   } catch (error: any) {

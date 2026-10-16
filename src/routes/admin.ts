@@ -10,6 +10,14 @@ import {
   sendDirectEmailMessage,
   sendWhatsAppTemplate,
 } from '../services/notificationService.js';
+import {
+  getAllFeePlans,
+  normalizeFeePlanKey,
+  resolveStudentFeeDetails,
+  calculateInstallments,
+  getNextDueInstallment,
+  FEE_PLANS,
+} from '../services/feeService.js';
 
 export const adminRouter = new Hono();
 
@@ -22,30 +30,44 @@ export async function getActiveStudents(): Promise<any[]> {
     try {
       const dbStudents = await StudentModel.find().sort({ createdAt: -1 });
       if (dbStudents && dbStudents.length > 0) {
-        const mapped = dbStudents.map((s) => ({
-          id: s._id.toString(),
-          _id: s._id.toString(),
-          name: s.name,
-          email: s.email,
-          rollNumber: s.rollNumber,
-          grade: s.grade,
-          section: s.section || 'A',
-          batch: s.batch || 'Cohort Alpha (12-Month Diploma)',
-          schoolName: s.schoolName || 'WeGrow Skill Campus Partner School',
-          parentName: s.parentName,
-          fatherName: s.fatherName || '',
-          motherName: s.motherName || '',
-          fatherPhone: s.fatherPhone || '',
-          motherPhone: s.motherPhone || '',
-          parentEmail: s.parentEmail,
-          parentWhatsApp: s.parentWhatsApp,
-          totalFees: s.totalFees || 45000,
-          paidFees: s.paidFees || 0,
-          dueFees: s.dueFees !== undefined ? s.dueFees : Math.max(0, (s.totalFees || 45000) - (s.paidFees || 0)),
-          attendanceRate: 100,
-          status: 'active',
-          createdAt: s.createdAt,
-        }));
+        const mapped = dbStudents.map((s) => {
+          const feeDetails = resolveStudentFeeDetails({
+            feeType: s.feeType || s.feePaymentPlan,
+            customTotalFees: s.totalFees,
+            paidFees: s.paidFees || 0,
+          });
+
+          return {
+            id: s._id.toString(),
+            _id: s._id.toString(),
+            name: s.name,
+            email: s.email,
+            rollNumber: s.rollNumber,
+            grade: s.grade,
+            section: s.section || 'A',
+            batch: s.batch || 'Cohort Alpha (12-Month Diploma)',
+            schoolName: s.schoolName || 'WeGrow Skill Campus Partner School',
+            parentName: s.parentName,
+            fatherName: s.fatherName || '',
+            motherName: s.motherName || '',
+            fatherPhone: s.fatherPhone || '',
+            motherPhone: s.motherPhone || '',
+            parentEmail: s.parentEmail,
+            parentWhatsApp: s.parentWhatsApp,
+            feeType: s.feeType || feeDetails.feeType,
+            feePaymentPlan: s.feePaymentPlan || feeDetails.feePaymentPlan,
+            feePlanLabel: s.feePlanLabel || feeDetails.feePlanLabel,
+            installmentCount: s.installmentCount || feeDetails.installmentCount,
+            installmentAmount: s.installmentAmount || feeDetails.installmentAmount,
+            installments: (s.installments && s.installments.length > 0) ? s.installments : feeDetails.installments,
+            totalFees: s.totalFees !== undefined ? s.totalFees : feeDetails.totalFees,
+            paidFees: s.paidFees || 0,
+            dueFees: s.dueFees !== undefined ? s.dueFees : feeDetails.dueFees,
+            attendanceRate: 100,
+            status: 'active',
+            createdAt: s.createdAt,
+          };
+        });
 
         ADMIN_STUDENTS.length = 0;
         ADMIN_STUDENTS.push(...mapped);
@@ -278,6 +300,14 @@ adminRouter.post('/load-sample-students', (c) => {
   });
 });
 
+// Fee Plans Endpoint
+adminRouter.get('/fee-plans', (c) => {
+  return c.json({
+    success: true,
+    data: getAllFeePlans(),
+  });
+});
+
 // 4. Create New Student Enrollment by Admin
 adminRouter.post('/students', async (c) => {
   try {
@@ -292,7 +322,11 @@ adminRouter.post('/students', async (c) => {
       motherPhone,
       email,
       batch = 'Cohort Alpha (12-Month Diploma)',
-      totalFees = 45000,
+      feeType,
+      feePaymentPlan,
+      feePlan,
+      paymentMethod,
+      totalFees,
       paidFees = 0,
       rollNumber: customRoll,
       password: customPassword,
@@ -338,9 +372,16 @@ adminRouter.post('/students', async (c) => {
 
     const newId = `std_${Date.now().toString(36)}`;
     const parentName = (fatherName || motherName || 'Parent').trim();
-    const parsedTotalFees = Number(totalFees) || 45000;
-    const parsedPaidFees = Number(paidFees) || 0;
-    const dueFees = Math.max(0, parsedTotalFees - parsedPaidFees);
+
+    // Resolve Fee Plan Method:
+    // Option 1: Full Payment (₹43,000)
+    // Option 2: 2 Half Payment (₹45,000 split ₹22,500 x 2)
+    // Option 3: Term Payment (₹45,000 / 3 = ₹15,000 x 3)
+    const feeDetails = resolveStudentFeeDetails({
+      feeType: feeType || feePaymentPlan || feePlan || paymentMethod,
+      customTotalFees: totalFees,
+      paidFees,
+    });
 
     const newStudent: any = {
       id: newId,
@@ -360,9 +401,15 @@ adminRouter.post('/students', async (c) => {
       parentName,
       parentEmail: cleanEmail,
       parentWhatsApp: cleanPhone,
-      totalFees: parsedTotalFees,
-      paidFees: parsedPaidFees,
-      dueFees,
+      feeType: feeDetails.feeType,
+      feePaymentPlan: feeDetails.feePaymentPlan,
+      feePlanLabel: feeDetails.feePlanLabel,
+      installmentCount: feeDetails.installmentCount,
+      installmentAmount: feeDetails.installmentAmount,
+      installments: feeDetails.installments,
+      totalFees: feeDetails.totalFees,
+      paidFees: feeDetails.paidFees,
+      dueFees: feeDetails.dueFees,
       attendanceRate: 100,
       status: 'active',
       createdAt: new Date().toISOString(),
@@ -390,6 +437,12 @@ adminRouter.post('/students', async (c) => {
           motherPhone: newStudent.motherPhone,
           parentEmail: newStudent.parentEmail,
           parentWhatsApp: newStudent.parentWhatsApp,
+          feeType: newStudent.feeType,
+          feePaymentPlan: newStudent.feePaymentPlan,
+          feePlanLabel: newStudent.feePlanLabel,
+          installmentCount: newStudent.installmentCount,
+          installmentAmount: newStudent.installmentAmount,
+          installments: newStudent.installments,
           totalFees: newStudent.totalFees,
           paidFees: newStudent.paidFees,
           dueFees: newStudent.dueFees,
@@ -401,11 +454,167 @@ adminRouter.post('/students', async (c) => {
 
     return c.json({
       success: true,
-      message: `Student ${newStudent.name} enrolled successfully! Assigned Roll No: ${rollNumber} | Password: ${finalPassword}`,
+      message: `Student ${newStudent.name} enrolled successfully with ${feeDetails.feePlanLabel}! Assigned Roll No: ${rollNumber} | Password: ${finalPassword}`,
       student: newStudent,
+      feeDetails,
     });
   } catch (err: any) {
     return c.json({ success: false, message: err.message || 'Failed to create student' }, 500);
+  }
+});
+
+// Update Student Profile & Fee Plan
+adminRouter.put('/students/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const students = await getActiveStudents();
+    const student = students.find((s) => s.id === id || s._id === id || s.rollNumber === id);
+    if (!student) {
+      return c.json({ success: false, message: 'Student not found' }, 404);
+    }
+
+    const newFeeType = body.feeType !== undefined ? body.feeType : (body.feePaymentPlan !== undefined ? body.feePaymentPlan : student.feeType);
+    const newTotalFees = body.totalFees !== undefined ? body.totalFees : student.totalFees;
+    const newPaidFees = body.paidFees !== undefined ? body.paidFees : student.paidFees;
+
+    const feeDetails = resolveStudentFeeDetails({
+      feeType: newFeeType,
+      customTotalFees: newTotalFees,
+      paidFees: newPaidFees,
+    });
+
+    student.name = body.name ? body.name.trim() : student.name;
+    student.grade = body.grade || student.grade;
+    student.batch = body.batch || student.batch;
+    student.schoolName = body.schoolName !== undefined ? body.schoolName : student.schoolName;
+    student.fatherName = body.fatherName !== undefined ? body.fatherName : student.fatherName;
+    student.motherName = body.motherName !== undefined ? body.motherName : student.motherName;
+    student.fatherPhone = body.fatherPhone !== undefined ? body.fatherPhone : student.fatherPhone;
+    student.motherPhone = body.motherPhone !== undefined ? body.motherPhone : student.motherPhone;
+    student.feeType = feeDetails.feeType;
+    student.feePaymentPlan = feeDetails.feePaymentPlan;
+    student.feePlanLabel = feeDetails.feePlanLabel;
+    student.installmentCount = feeDetails.installmentCount;
+    student.installmentAmount = feeDetails.installmentAmount;
+    student.installments = feeDetails.installments;
+    student.totalFees = feeDetails.totalFees;
+    student.paidFees = feeDetails.paidFees;
+    student.dueFees = feeDetails.dueFees;
+
+    if (isMongoConnected()) {
+      try {
+        await StudentModel.findOneAndUpdate(
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          {
+            name: student.name,
+            grade: student.grade,
+            batch: student.batch,
+            schoolName: student.schoolName,
+            fatherName: student.fatherName,
+            motherName: student.motherName,
+            fatherPhone: student.fatherPhone,
+            motherPhone: student.motherPhone,
+            feeType: student.feeType,
+            feePaymentPlan: student.feePaymentPlan,
+            feePlanLabel: student.feePlanLabel,
+            installmentCount: student.installmentCount,
+            installmentAmount: student.installmentAmount,
+            installments: student.installments,
+            totalFees: student.totalFees,
+            paidFees: student.paidFees,
+            dueFees: student.dueFees,
+          }
+        );
+      } catch (err: any) {
+        console.warn('MongoDB student update warning:', err.message);
+      }
+    }
+
+    return c.json({
+      success: true,
+      message: `Student ${student.name} updated successfully! Fee Plan: ${student.feePlanLabel}`,
+      student,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, message: err.message || 'Failed to update student' }, 500);
+  }
+});
+
+adminRouter.patch('/students/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const students = await getActiveStudents();
+    const student = students.find((s) => s.id === id || s._id === id || s.rollNumber === id);
+    if (!student) {
+      return c.json({ success: false, message: 'Student not found' }, 404);
+    }
+
+    const newFeeType = body.feeType !== undefined ? body.feeType : (body.feePaymentPlan !== undefined ? body.feePaymentPlan : student.feeType);
+    const newTotalFees = body.totalFees !== undefined ? body.totalFees : student.totalFees;
+    const newPaidFees = body.paidFees !== undefined ? body.paidFees : student.paidFees;
+
+    const feeDetails = resolveStudentFeeDetails({
+      feeType: newFeeType,
+      customTotalFees: newTotalFees,
+      paidFees: newPaidFees,
+    });
+
+    student.name = body.name ? body.name.trim() : student.name;
+    student.grade = body.grade || student.grade;
+    student.batch = body.batch || student.batch;
+    student.schoolName = body.schoolName !== undefined ? body.schoolName : student.schoolName;
+    student.fatherName = body.fatherName !== undefined ? body.fatherName : student.fatherName;
+    student.motherName = body.motherName !== undefined ? body.motherName : student.motherName;
+    student.fatherPhone = body.fatherPhone !== undefined ? body.fatherPhone : student.fatherPhone;
+    student.motherPhone = body.motherPhone !== undefined ? body.motherPhone : student.motherPhone;
+    student.feeType = feeDetails.feeType;
+    student.feePaymentPlan = feeDetails.feePaymentPlan;
+    student.feePlanLabel = feeDetails.feePlanLabel;
+    student.installmentCount = feeDetails.installmentCount;
+    student.installmentAmount = feeDetails.installmentAmount;
+    student.installments = feeDetails.installments;
+    student.totalFees = feeDetails.totalFees;
+    student.paidFees = feeDetails.paidFees;
+    student.dueFees = feeDetails.dueFees;
+
+    if (isMongoConnected()) {
+      try {
+        await StudentModel.findOneAndUpdate(
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          {
+            name: student.name,
+            grade: student.grade,
+            batch: student.batch,
+            schoolName: student.schoolName,
+            fatherName: student.fatherName,
+            motherName: student.motherName,
+            fatherPhone: student.fatherPhone,
+            motherPhone: student.motherPhone,
+            feeType: student.feeType,
+            feePaymentPlan: student.feePaymentPlan,
+            feePlanLabel: student.feePlanLabel,
+            installmentCount: student.installmentCount,
+            installmentAmount: student.installmentAmount,
+            installments: student.installments,
+            totalFees: student.totalFees,
+            paidFees: student.paidFees,
+            dueFees: student.dueFees,
+          }
+        );
+      } catch (err: any) {
+        console.warn('MongoDB student update warning:', err.message);
+      }
+    }
+
+    return c.json({
+      success: true,
+      message: `Student ${student.name} updated successfully! Fee Plan: ${student.feePlanLabel}`,
+      student,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, message: err.message || 'Failed to patch student' }, 500);
   }
 });
 
@@ -1008,7 +1217,8 @@ adminRouter.post('/record-payment', async (c) => {
     const body = await c.req.json();
     const { studentId, amount, paymentMethod = 'UPI', feeType = 'Term Tuition Fee', referenceNumber } = body;
 
-    const student = ADMIN_STUDENTS.find((s) => s.id === studentId || s._id === studentId);
+    const students = await getActiveStudents();
+    const student = students.find((s) => s.id === studentId || s._id === studentId || s.rollNumber === studentId);
     if (!student) {
       return c.json({ success: false, message: 'Student not found' }, 404);
     }
@@ -1031,8 +1241,25 @@ adminRouter.post('/record-payment', async (c) => {
     };
 
     SEED_DATA.payments.unshift(newPayment);
-    student.paidFees += paidAmt;
-    student.dueFees = Math.max(0, student.totalFees - student.paidFees);
+    student.paidFees = (student.paidFees || 0) + paidAmt;
+    student.dueFees = Math.max(0, (student.totalFees || 45000) - student.paidFees);
+    student.installments = calculateInstallments(student.feeType || 'term', student.totalFees || 45000, student.paidFees);
+    const nextDue = getNextDueInstallment(student.installments);
+
+    if (isMongoConnected()) {
+      try {
+        await StudentModel.findOneAndUpdate(
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          {
+            paidFees: student.paidFees,
+            dueFees: student.dueFees,
+            installments: student.installments,
+          }
+        );
+      } catch (err: any) {
+        console.warn('MongoDB record payment student update warning:', err.message);
+      }
+    }
 
     return c.json({
       success: true,
@@ -1042,6 +1269,10 @@ adminRouter.post('/record-payment', async (c) => {
         totalFees: student.totalFees,
         paidFees: student.paidFees,
         dueFees: student.dueFees,
+        feeType: student.feeType,
+        feePlanLabel: student.feePlanLabel,
+        installments: student.installments,
+        nextDueInstallment: nextDue,
       },
     });
   } catch (err: any) {
