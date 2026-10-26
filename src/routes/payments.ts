@@ -35,17 +35,15 @@ async function getStudentFromRequest(c: any): Promise<any> {
     } catch (e) {}
   }
 
-  // 1. Search in active ADMIN_STUDENTS roster
+  // 1. Search in active ADMIN_STUDENTS roster (prioritize studentId / rollNumber)
   let student = ADMIN_STUDENTS.find((s) => {
     const sId = (s.id || s._id || '').toString();
-    const sEmail = (s.email || '').toLowerCase().trim();
     const sRoll = (s.rollNumber || '').toLowerCase().trim();
-    return (
-      (studentId && sId === studentId) ||
-      (email && sEmail === email) ||
-      (roll && sRoll === roll)
-    );
+    return (studentId && sId === studentId) || (roll && sRoll === roll);
   });
+  if (!student && email) {
+    student = ADMIN_STUDENTS.find((s) => (s.email || '').toLowerCase().trim() === email);
+  }
 
   // 2. Search in MongoDB if connected
   if (!student && isMongoConnected()) {
@@ -55,11 +53,13 @@ async function getStudentFromRequest(c: any): Promise<any> {
         conditions.push({ _id: studentId });
         conditions.push({ id: studentId });
       }
-      if (email) conditions.push({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
       if (roll) conditions.push({ rollNumber: { $regex: new RegExp(`^${roll}$`, 'i') } });
 
       if (conditions.length > 0) {
         student = await StudentModel.findOne({ $or: conditions });
+      }
+      if (!student && email) {
+        student = await StudentModel.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
       }
     } catch (err: any) {
       console.warn('Payment Mongo student query warning:', err.message);
@@ -313,7 +313,7 @@ paymentsRouter.post('/verify', async (c) => {
         try {
           await PaymentModel.create(newPaymentRecord);
           await StudentModel.findOneAndUpdate(
-            { $or: [{ _id: sId }, { email: student.email }] },
+            { $or: [{ _id: sId }, { rollNumber: student.rollNumber }] },
             {
               paidFees: student.paidFees,
               dueFees: student.dueFees,

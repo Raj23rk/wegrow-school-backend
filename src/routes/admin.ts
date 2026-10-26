@@ -344,15 +344,23 @@ adminRouter.post('/students', async (c) => {
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = (fatherPhone || motherPhone || '').trim();
+    const studentName = name.trim();
 
-    // Check duplicate email
     const allExisting = await getActiveStudents();
-    const existing = allExisting.find(
-      (s) => s.email.toLowerCase() === cleanEmail
+
+    // Support for siblings / multiple children sharing the same parent email (e.g. drbalaphysio@gmail.com).
+    // Duplicate check prevents accidental double-enrollment of the exact same student (same name + email).
+    const existingSameChild = allExisting.find(
+      (s) =>
+        (s.name || '').trim().toLowerCase() === studentName.toLowerCase() &&
+        (s.email || '').trim().toLowerCase() === cleanEmail
     );
-    if (existing) {
+    if (existingSameChild) {
       return c.json(
-        { success: false, message: `Student with email ${cleanEmail} already exists!` },
+        {
+          success: false,
+          message: `Student '${studentName}' with email ${cleanEmail} is already enrolled with Roll No: ${existingSameChild.rollNumber}. Multiple children/siblings of the same parent are allowed under different student names.`,
+        },
         400
       );
     }
@@ -361,6 +369,19 @@ adminRouter.post('/students', async (c) => {
     const rollNumber = (customRoll && typeof customRoll === 'string' && customRoll.trim())
       ? customRoll.trim().toUpperCase()
       : await generateNextEnrollmentNumber();
+
+    // Check custom roll number collision
+    if (customRoll) {
+      const existingRoll = allExisting.find(
+        (s) => (s.rollNumber || '').trim().toUpperCase() === rollNumber
+      );
+      if (existingRoll) {
+        return c.json(
+          { success: false, message: `Student with Roll Number ${rollNumber} already exists!` },
+          400
+        );
+      }
+    }
 
     // Determine Password created with Admin (defaults to [RollNumber]@2026)
     const finalPassword = (customPassword && typeof customPassword === 'string' && customPassword.trim())
@@ -505,7 +526,7 @@ adminRouter.put('/students/:id', async (c) => {
     if (isMongoConnected()) {
       try {
         await StudentModel.findOneAndUpdate(
-          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }] },
           {
             name: student.name,
             grade: student.grade,
@@ -582,7 +603,7 @@ adminRouter.patch('/students/:id', async (c) => {
     if (isMongoConnected()) {
       try {
         await StudentModel.findOneAndUpdate(
-          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }] },
           {
             name: student.name,
             grade: student.grade,
@@ -631,7 +652,7 @@ adminRouter.delete('/students/:id', async (c) => {
   if (isMongoConnected()) {
     try {
       await StudentModel.findOneAndDelete({
-        $or: [{ _id: id }, { rollNumber: removed.rollNumber }, { email: removed.email }],
+        $or: [{ _id: id }, { rollNumber: removed.rollNumber }],
       });
     } catch (e) {
       // ignore
@@ -1249,7 +1270,7 @@ adminRouter.post('/record-payment', async (c) => {
     if (isMongoConnected()) {
       try {
         await StudentModel.findOneAndUpdate(
-          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }, { email: student.email }] },
+          { $or: [{ _id: student._id || student.id }, { rollNumber: student.rollNumber }] },
           {
             paidFees: student.paidFees,
             dueFees: student.dueFees,

@@ -13,6 +13,20 @@ export async function connectMongo(): Promise<boolean> {
     });
     isConnected = true;
     console.log(`[MongoDB] Connected successfully to: ${conn.connection.name}`);
+
+    // Ensure legacy unique index on student email is removed to allow siblings / shared parent emails
+    try {
+      const studentColl = conn.connection.collection('students');
+      const indexes = await studentColl.indexes();
+      const legacyEmailIdx = indexes.find((idx) => idx.name === 'email_1');
+      if (legacyEmailIdx && legacyEmailIdx.unique) {
+        await studentColl.dropIndex('email_1');
+        console.log('[MongoDB] Legacy unique index email_1 removed to support shared parent email');
+      }
+    } catch (e: any) {
+      // index already dropped or collection not yet initialized
+    }
+
     return true;
   } catch (err: any) {
     console.warn(`[MongoDB] Connection warning (${err.message}). Using hybrid fallback store if needed.`);
@@ -21,5 +35,5 @@ export async function connectMongo(): Promise<boolean> {
 }
 
 export function isMongoConnected(): boolean {
-  return isConnected && mongoose.connection.readyState === 1;
+  return mongoose.connection.readyState === 1;
 }

@@ -14,29 +14,36 @@ import { resolveStudentFeeDetails, getNextDueInstallment } from '../services/fee
 
 export const authRouter = new Hono();
 
-// Helper to look up student by enrollment ID / roll number or email
+// Helper to look up student by enrollment ID / roll number or email (prioritizing unique rollNumber / ID)
 async function findStudentByIdentifier(identifier: string) {
   const cleanId = (identifier || '').trim().toLowerCase();
   if (!cleanId) return null;
 
-  // 1. Check in-memory ADMIN_STUDENTS roster
-  const fromAdmin = ADMIN_STUDENTS.find((s) => {
+  // 1. Check in-memory ADMIN_STUDENTS roster - prioritize roll number / id match
+  let fromAdmin = ADMIN_STUDENTS.find((s) => {
     const roll = (s.rollNumber || '').trim().toLowerCase();
-    const email = (s.email || '').trim().toLowerCase();
     const id = (s.id || s._id || '').toString().trim().toLowerCase();
-    return roll === cleanId || email === cleanId || id === cleanId;
+    return roll === cleanId || id === cleanId;
   });
+  if (!fromAdmin) {
+    fromAdmin = ADMIN_STUDENTS.find((s) => (s.email || '').trim().toLowerCase() === cleanId);
+  }
   if (fromAdmin) return fromAdmin;
 
   // 2. Check MongoDB if connected
   if (isMongoConnected()) {
     try {
-      const student = await StudentModel.findOne({
+      let student = await StudentModel.findOne({
         $or: [
-          { email: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
           { rollNumber: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+          ...(cleanId.length === 24 ? [{ _id: cleanId }] : []),
         ],
       });
+      if (!student) {
+        student = await StudentModel.findOne({
+          email: { $regex: new RegExp(`^${cleanId}$`, 'i') },
+        });
+      }
       if (student) return student;
     } catch (e) {
       console.warn('[Auth] MongoDB query fallback:', e);
@@ -44,6 +51,52 @@ async function findStudentByIdentifier(identifier: string) {
   }
 
   return null;
+}
+
+// Helper to look up all student candidates matching identifier (handles siblings sharing parent email)
+async function findStudentsByIdentifier(identifier: string): Promise<any[]> {
+  const cleanId = (identifier || '').trim().toLowerCase();
+  if (!cleanId) return [];
+
+  const candidates: any[] = [];
+  const seenIds = new Set<string>();
+
+  const addCandidate = (s: any) => {
+    const sId = (s.rollNumber || s._id || s.id || '').toString().toLowerCase();
+    if (sId && !seenIds.has(sId)) {
+      seenIds.add(sId);
+      candidates.push(s);
+    }
+  };
+
+  // 1. Check in-memory ADMIN_STUDENTS roster
+  for (const s of ADMIN_STUDENTS) {
+    const roll = (s.rollNumber || '').trim().toLowerCase();
+    const email = (s.email || '').trim().toLowerCase();
+    const id = (s.id || s._id || '').toString().trim().toLowerCase();
+    if (roll === cleanId || email === cleanId || id === cleanId) {
+      addCandidate(s);
+    }
+  }
+
+  // 2. Check MongoDB if connected
+  if (isMongoConnected()) {
+    try {
+      const dbStudents = await StudentModel.find({
+        $or: [
+          { rollNumber: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+          { email: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+        ],
+      });
+      for (const s of dbStudents) {
+        addCandidate(s);
+      }
+    } catch (e) {
+      console.warn('[Auth] MongoDB candidates query fallback:', e);
+    }
+  }
+
+  return candidates;
 }
 
 authRouter.post('/login', async (c) => {
@@ -86,18 +139,27 @@ authRouter.post('/login', async (c) => {
     }
 
     // 2. Student Authentication (by Roll No / Enrollment ID or Email)
-    const student = await findStudentByIdentifier(identifier);
+    // Supports siblings / two children sharing the same parent email
+    const candidateStudents = await findStudentsByIdentifier(identifier);
 
-    if (!student) {
+    if (!candidateStudents || candidateStudents.length === 0) {
       return c.json({ success: false, message: 'No student or admin account found with these credentials' }, 401);
     }
 
-    const hasHash = Boolean(student.passwordHash);
-    const isHashMatch = hasHash ? bcrypt.compareSync(password, student.passwordHash) : false;
-    const isDirectMatch = Boolean(student.password && student.password === password);
-    const isEnrollmentPassword = Boolean(student.rollNumber && password === `${student.rollNumber}@2026`);
+    let student = null;
+    for (const cand of candidateStudents) {
+      const hasHash = Boolean(cand.passwordHash);
+      const isHashMatch = hasHash ? bcrypt.compareSync(password, cand.passwordHash) : false;
+      const isDirectMatch = Boolean(cand.password && cand.password === password);
+      const isEnrollmentPassword = Boolean(cand.rollNumber && password === `${cand.rollNumber}@2026`);
 
-    if (!isHashMatch && !isDirectMatch && !isEnrollmentPassword) {
+      if (isHashMatch || isDirectMatch || isEnrollmentPassword) {
+        student = cand;
+        break;
+      }
+    }
+
+    if (!student) {
       return c.json({ success: false, message: 'Invalid credentials. Password does not match.' }, 401);
     }
 
@@ -241,18 +303,26 @@ authRouter.put('/profile', async (c) => {
   try {
     const authHeader = c.req.header('Authorization');
     let emailFromToken = '';
+    let rollFromToken = '';
+    let idFromToken = '';
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const decoded = jwt.verify(authHeader.split(' ')[1], ENV.JWT_SECRET) as any;
         emailFromToken = decoded.email || '';
+        rollFromToken = decoded.rollNumber || '';
+        idFromToken = decoded.id || decoded._id || '';
       } catch {}
     }
 
     const body = await c.req.json();
     const { name, phone, address, parentName, parentEmail, parentWhatsApp, avatar } = body;
 
-    // Update in ADMIN_STUDENTS if present
-    const st = ADMIN_STUDENTS.find((s) => s.email === emailFromToken);
+    // Update in ADMIN_STUDENTS if present (match by id/rollNumber first)
+    const st = ADMIN_STUDENTS.find((s) =>
+      (idFromToken && (s.id === idFromToken || s._id === idFromToken)) ||
+      (rollFromToken && s.rollNumber === rollFromToken) ||
+      (emailFromToken && s.email === emailFromToken)
+    );
     if (st) {
       if (name) st.name = name;
       if (phone) st.phone = phone;
@@ -263,9 +333,14 @@ authRouter.put('/profile', async (c) => {
       if (avatar) st.avatar = avatar;
     }
 
-    if (isMongoConnected() && emailFromToken) {
+    if (isMongoConnected() && (idFromToken || rollFromToken || emailFromToken)) {
+      const matchConditions: any[] = [];
+      if (idFromToken) matchConditions.push({ _id: idFromToken });
+      if (rollFromToken) matchConditions.push({ rollNumber: rollFromToken });
+      if (matchConditions.length === 0 && emailFromToken) matchConditions.push({ email: emailFromToken });
+
       await StudentModel.findOneAndUpdate(
-        { email: emailFromToken },
+        { $or: matchConditions },
         { name, phone, address, parentName, parentEmail, parentWhatsApp, ...(avatar ? { avatar } : {}) },
         { new: true }
       );
@@ -293,21 +368,34 @@ authRouter.post('/upload-avatar', async (c) => {
 
     const authHeader = c.req.header('Authorization');
     let emailFromToken = '';
+    let rollFromToken = '';
+    let idFromToken = '';
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const decoded = jwt.verify(authHeader.split(' ')[1], ENV.JWT_SECRET) as any;
         emailFromToken = decoded.email || '';
+        rollFromToken = decoded.rollNumber || '';
+        idFromToken = decoded.id || decoded._id || '';
       } catch {}
     }
 
-    const st = ADMIN_STUDENTS.find((s) => s.email === emailFromToken);
+    const st = ADMIN_STUDENTS.find((s) =>
+      (idFromToken && (s.id === idFromToken || s._id === idFromToken)) ||
+      (rollFromToken && s.rollNumber === rollFromToken) ||
+      (emailFromToken && s.email === emailFromToken)
+    );
     if (st) {
       st.avatar = avatar;
     }
 
-    if (isMongoConnected() && emailFromToken) {
+    if (isMongoConnected() && (idFromToken || rollFromToken || emailFromToken)) {
+      const matchConditions: any[] = [];
+      if (idFromToken) matchConditions.push({ _id: idFromToken });
+      if (rollFromToken) matchConditions.push({ rollNumber: rollFromToken });
+      if (matchConditions.length === 0 && emailFromToken) matchConditions.push({ email: emailFromToken });
+
       await StudentModel.findOneAndUpdate(
-        { email: emailFromToken },
+        { $or: matchConditions },
         { avatar },
         { new: true }
       );
