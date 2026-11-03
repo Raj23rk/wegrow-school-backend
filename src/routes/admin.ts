@@ -77,6 +77,42 @@ export async function getActiveStudents(): Promise<any[]> {
       console.warn('getActiveStudents MongoDB fetch fallback:', err.message);
     }
   }
+
+  // Fallback demo student if roster is completely empty
+  if (ADMIN_STUDENTS.length === 0) {
+    ADMIN_STUDENTS.push({
+      id: 'std_demo_001',
+      _id: 'std_demo_001',
+      name: 'Aarav Sharma',
+      email: 'aarav.sharma@gmail.com',
+      rollNumber: 'WG26-001',
+      grade: 'Grade 10 - AI & Robotics Track',
+      section: 'A',
+      batch: 'Cohort Alpha (12-Month Diploma)',
+      schoolName: 'WeGrow Skill Campus Partner School',
+      parentName: 'Ramesh Sharma',
+      fatherName: 'Ramesh Sharma',
+      motherName: 'Sunita Sharma',
+      fatherPhone: '+91 98765 43210',
+      motherPhone: '+91 98765 43211',
+      parentEmail: 'ramesh.sharma@gmail.com',
+      parentWhatsApp: '+91 98765 43210',
+      feeType: 'term_payment',
+      feePaymentPlan: 'term_payment',
+      feePlanLabel: '3. Term Payment - ₹45,000 (3 Terms x ₹15,000)',
+      installmentCount: 3,
+      installmentAmount: 15000,
+      totalFees: 45000,
+      paidFees: 15000,
+      dueFees: 30000,
+      attendanceRate: 96,
+      status: 'active',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      password: 'WG26-001@2026',
+      passwordHash: bcrypt.hashSync('WG26-001@2026', 8),
+    });
+  }
+
   return ADMIN_STUDENTS;
 }
 
