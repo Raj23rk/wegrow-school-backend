@@ -15,6 +15,7 @@ import { paymentsRouter } from './routes/payments.js';
 import { adminRouter } from './routes/admin.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { attendanceRouter } from './routes/attendance.js';
+import { workshopRouter } from './routes/workshop.js';
 
 const app = new Hono();
 
@@ -95,6 +96,8 @@ app.route('/api/materials', materialsRouter);
 app.route('/api/assignments', assignmentsRouter);
 app.route('/api/payments', paymentsRouter);
 app.route('/api/attendance', attendanceRouter);
+app.route('/api/workshop', workshopRouter);
+app.route('/api/admin/workshop', workshopRouter);
 app.route('/api/v1/notifications', notificationsRouter);
 app.route('/api/notifications', notificationsRouter);
 
