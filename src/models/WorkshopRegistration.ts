@@ -63,3 +63,4 @@ const WorkshopRegistrationSchema = new Schema<IWorkshopRegistration>(
 export const WorkshopRegistrationModel =
   mongoose.models.WorkshopRegistration ||
   mongoose.model<IWorkshopRegistration>('WorkshopRegistration', WorkshopRegistrationSchema);
+

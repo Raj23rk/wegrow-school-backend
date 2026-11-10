@@ -138,15 +138,15 @@ workshopRouter.post('/create-order', async (c) => {
 
     const registrationId = generateRegistrationId();
     const receiptId = `RCPT_${registrationId}`;
-    const amountInInr = 99; // ₹99 workshop fee
+    const amountInInr = Number(body.amount) > 0 ? Number(body.amount) : 99; // Supports ₹2 test or ₹99 standard fee
 
-    // 1. Create Razorpay order (₹99 -> 9900 paise)
+    // 1. Create Razorpay order (₹2 -> 200 paise, or ₹99 -> 9900 paise)
     const orderData = await createRazorpayOrder(amountInInr, receiptId, {
       registrationId,
       studentName: studentName.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
-      workshop: 'WebSpark AI Workshop',
+      workshop: amountInInr === 2 ? 'WebSpark AI Workshop (Live Test ₹2)' : 'WebSpark AI Workshop',
     });
 
     const newRecord = {
@@ -303,7 +303,7 @@ workshopRouter.post('/verify-payment', async (c) => {
       schoolName: body.schoolName || '',
       grade: body.grade || '',
       city: body.city || '',
-      amount: 99,
+      amount: matchedRecord?.amount || Number(body.amount) || 99,
       paymentStatus: 'paid',
       razorpayOrderId: razorpay_order_id,
       razorpayPaymentId: razorpay_payment_id,
@@ -313,7 +313,7 @@ workshopRouter.post('/verify-payment', async (c) => {
     // 3. Dispatch WhatsApp Confirmation Notice (asynchronous, non-blocking)
     if (finalRecord.phone) {
       try {
-        const messageText = `🎉 *Registration Confirmed! WebSpark AI Workshop*\n\nDear ${finalRecord.studentName},\n\nYour seat for *WebSpark AI - AI Website Building Workshop* is successfully booked!\n\n📋 *Registration ID:* ${finalRecord.registrationId}\n💰 *Amount Paid:* ₹99 (Paid via Razorpay)\n💳 *Payment Ref:* ${razorpay_payment_id}\n\n🗓️ *Date:* 28 November 2026\n⏰ *Time:* 5:00 PM – 7:00 PM\n💻 *Mode:* Live Online Workshop\n📞 *Helpline:* 93443 37331\n\nWe will share the meeting joining link and AI website templates on your WhatsApp 2 hours before the session.\n\n_WeGrow Skill Campus & B School_`;
+        const messageText = `🎉 *Registration Confirmed! WebSpark AI Workshop*\n\nDear ${finalRecord.studentName},\n\nYour seat for *WebSpark AI - AI Website Building Workshop* is successfully booked!\n\n📋 *Registration ID:* ${finalRecord.registrationId}\n💰 *Amount Paid:* ₹${finalRecord.amount || 99} (Paid via Razorpay)\n💳 *Payment Ref:* ${razorpay_payment_id}\n\n🗓️ *Date:* 28 November 2026\n⏰ *Time:* 5:00 PM – 7:00 PM\n💻 *Mode:* Live Online Workshop\n📞 *Helpline:* 93443 37331\n\nWe will share the meeting joining link and AI website templates on your WhatsApp 2 hours before the session.\n\n_WeGrow Skill Campus & B School_`;
 
         sendWhatsAppTemplate({
           contact: finalRecord.phone,
@@ -337,7 +337,7 @@ workshopRouter.post('/verify-payment', async (c) => {
             </div>
             
             <div style="background-color: #EEF8F1; border: 1px solid #B8E4C7; border-radius: 12px; padding: 16px; margin-bottom: 20px; text-align: center;">
-              <h3 style="color: #166534; margin: 0 0 6px 0;">🎉 Payment of ₹99 Received &amp; Seat Confirmed!</h3>
+              <h3 style="color: #166534; margin: 0 0 6px 0;">🎉 Payment of ₹${finalRecord.amount || 99} Received &amp; Seat Confirmed!</h3>
               <p style="color: #15803D; margin: 0; font-size: 14px;">Registration ID: <strong>${finalRecord.registrationId}</strong></p>
             </div>
 
@@ -367,7 +367,7 @@ workshopRouter.post('/verify-payment', async (c) => {
               </tr>
               <tr>
                 <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #64748b;">Fee Paid:</td>
-                <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 700; color: #166534;">₹99 (Razorpay ID: ${razorpay_payment_id})</td>
+                <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 700; color: #166534;">₹${finalRecord.amount || 99} (Razorpay ID: ${razorpay_payment_id})</td>
               </tr>
               <tr>
                 <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #64748b;">Helpline:</td>
@@ -479,7 +479,9 @@ workshopRouter.get('/registrations', async (c) => {
     const totalRegistrations = rawAll.length;
     const paidRegistrations = rawAll.filter((r) => r.paymentStatus === 'paid').length;
     const pendingRegistrations = rawAll.filter((r) => r.paymentStatus === 'pending').length;
-    const totalRevenue = paidRegistrations * 99;
+    const totalRevenue = rawAll
+      .filter((r) => r.paymentStatus === 'paid')
+      .reduce((sum, r) => sum + (Number(r.amount) || 99), 0);
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -693,3 +695,4 @@ workshopRouter.get('/export-csv', async (c) => {
     return c.json({ success: false, message: err.message }, 500);
   }
 });
+
