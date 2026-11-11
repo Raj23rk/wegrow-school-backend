@@ -15,7 +15,7 @@ videosRouter.get('/', async (c) => {
       const mongoList = await VideoLectureModel.find().sort({ createdAt: -1 }).lean();
       if (mongoList && mongoList.length > 0) {
         const map = new Map<string, any>();
-        for (const v of mongoList) map.set(v._id, v);
+        for (const v of (mongoList as any[])) map.set(String(v._id), v);
         for (const v of SEED_DATA.videos) {
           if (!map.has(v._id)) map.set(v._id, v);
         }

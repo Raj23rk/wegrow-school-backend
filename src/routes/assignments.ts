@@ -13,7 +13,7 @@ assignmentsRouter.get('/', async (c) => {
       const mongoList = await AssignmentModel.find().lean();
       if (mongoList && mongoList.length > 0) {
         const map = new Map<string, any>();
-        for (const a of mongoList) map.set(a._id, a);
+        for (const a of (mongoList as any[])) map.set(String(a._id), a);
         for (const a of SEED_DATA.assignments) {
           if (!map.has(a._id)) map.set(a._id, a);
         }

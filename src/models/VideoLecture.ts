@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IVideoLecture extends Document {
+export interface IVideoLecture {
   _id: string;
   title: string;
   subject: string;

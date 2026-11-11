@@ -12,7 +12,7 @@ export interface IAssignmentSubmission {
   status: 'submitted' | 'graded';
 }
 
-export interface IAssignment extends Document {
+export interface IAssignment {
   _id: string;
   title: string;
   subject: string;

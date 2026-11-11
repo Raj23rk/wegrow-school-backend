@@ -16,7 +16,7 @@ quizzesRouter.get('/', async (c) => {
       const mongoQuizzes = await QuizModel.find({ status: 'active' }).lean();
       if (mongoQuizzes && mongoQuizzes.length > 0) {
         const map = new Map<string, any>();
-        for (const q of mongoQuizzes) map.set(q._id, q);
+        for (const q of (mongoQuizzes as any[])) map.set(String(q._id), q);
         for (const q of SEED_DATA.quizzes) {
           if (!map.has(q._id)) map.set(q._id, q);
         }

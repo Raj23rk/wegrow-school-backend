@@ -9,7 +9,7 @@ export interface IQuestion {
   marks: number;
 }
 
-export interface IQuiz extends Document {
+export interface IQuiz {
   _id: string;
   title: string;
   subject: string;
