@@ -8,78 +8,13 @@ import { sendWhatsAppTemplate, dispatchEmailGateway } from '../services/notifica
 export const workshopRouter = new Hono();
 
 // In-Memory store to guarantee flawless operation even if database experiences latency
+// Holds only real runtime registrations (no demo seed data)
 const IN_MEMORY_REGISTRATIONS = new Map<string, any>();
 
 // Helper to generate a unique registration code like WS26-4892
 function generateRegistrationId(): string {
   const randomDigits = Math.floor(1000 + Math.random() * 9000);
   return `WS26-${randomDigits}`;
-}
-
-// Pre-populate demo seed participants for immediate testing
-const INITIAL_DEMO_PARTICIPANTS = [
-  {
-    registrationId: 'WS26-1011',
-    workshopName: 'WebSpark AI - AI Website Building Workshop',
-    studentName: 'Aarav Sharma',
-    email: 'aarav.sharma@gmail.com',
-    phone: '9840123456',
-    schoolName: 'Wisdom Wealth International School',
-    grade: 'Class 9',
-    city: 'Virudhunagar',
-    amount: 99,
-    currency: 'INR',
-    paymentStatus: 'paid',
-    paymentMethod: 'razorpay',
-    razorpayOrderId: 'order_demo_1011',
-    razorpayPaymentId: 'pay_live_wspk_01',
-    receiptNumber: 'RCPT_WS_1011',
-    registeredAt: new Date(Date.now() - 3600000 * 24 * 2),
-    paidAt: new Date(Date.now() - 3600000 * 24 * 2),
-  },
-  {
-    registrationId: 'WS26-1012',
-    workshopName: 'WebSpark AI - AI Website Building Workshop',
-    studentName: 'Kavya Ramanathan',
-    email: 'kavya.raman@outlook.com',
-    phone: '9876543210',
-    schoolName: 'KVS Matriculation Higher Secondary School',
-    grade: 'Class 10',
-    city: 'Sivakasi',
-    amount: 99,
-    currency: 'INR',
-    paymentStatus: 'paid',
-    paymentMethod: 'razorpay',
-    razorpayOrderId: 'order_demo_1012',
-    razorpayPaymentId: 'pay_live_wspk_02',
-    receiptNumber: 'RCPT_WS_1012',
-    registeredAt: new Date(Date.now() - 3600000 * 18),
-    paidAt: new Date(Date.now() - 3600000 * 18),
-  },
-  {
-    registrationId: 'WS26-1013',
-    workshopName: 'WebSpark AI - AI Website Building Workshop',
-    studentName: 'Siddharth V.',
-    email: 'sid.v@gmail.com',
-    phone: '9443322110',
-    schoolName: 'SHNV Higher Secondary School',
-    grade: 'Class 11 (Computer Science)',
-    city: 'Sivakasi',
-    amount: 99,
-    currency: 'INR',
-    paymentStatus: 'paid',
-    paymentMethod: 'razorpay',
-    razorpayOrderId: 'order_demo_1013',
-    razorpayPaymentId: 'pay_live_wspk_03',
-    receiptNumber: 'RCPT_WS_1013',
-    registeredAt: new Date(Date.now() - 3600000 * 6),
-    paidAt: new Date(Date.now() - 3600000 * 6),
-  },
-];
-
-// Seed initial memory store
-for (const p of INITIAL_DEMO_PARTICIPANTS) {
-  IN_MEMORY_REGISTRATIONS.set(p.registrationId, p);
 }
 
 // -------------------------------------------------------------------
@@ -417,25 +352,23 @@ workshopRouter.get('/registrations', async (c) => {
     const statusFilter = c.req.query('status') || ''; // 'paid', 'pending', or all
     const searchQuery = (c.req.query('search') || '').toLowerCase().trim();
 
-    let registrations: any[] = [];
+    let dbRecords: any[] = [];
 
-    // 1. Fetch from MongoDB Atlas if available
+    // 1. Fetch real records from MongoDB Atlas if available
     if (isMongoConnected()) {
       try {
-        const query: any = {};
-        if (statusFilter && statusFilter !== 'all') {
-          query.paymentStatus = statusFilter;
-        }
-        registrations = await WorkshopRegistrationModel.find(query).sort({ registeredAt: -1 }).lean();
+        dbRecords = await WorkshopRegistrationModel.find({}).sort({ registeredAt: -1 }).lean();
       } catch (dbErr: any) {
         console.warn('[Workshop Mongo Fetch Warning]:', dbErr.message);
       }
     }
 
-    // 2. Merge with in-memory store so no participant is lost
+    // 2. Combine with in-memory map (only real runtime records exist here)
     const regMap = new Map<string, any>();
-    for (const r of registrations) {
-      regMap.set(r.registrationId, r);
+    for (const r of dbRecords) {
+      if (r.registrationId) {
+        regMap.set(r.registrationId, r);
+      }
     }
     for (const [id, r] of IN_MEMORY_REGISTRATIONS.entries()) {
       if (!regMap.has(id)) {
@@ -449,12 +382,30 @@ workshopRouter.get('/registrations', async (c) => {
       }
     }
 
-    let allList = Array.from(regMap.values());
+    // All real records
+    const rawAll = Array.from(regMap.values());
+
+    // Calculate accurate KPI metrics across all real records
+    const totalRegistrations = rawAll.length;
+    const paidRegistrations = rawAll.filter((r) => r.paymentStatus === 'paid').length;
+    const pendingRegistrations = rawAll.filter((r) => r.paymentStatus === 'pending').length;
+    const totalRevenue = rawAll
+      .filter((r) => r.paymentStatus === 'paid')
+      .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayRegistrations = rawAll.filter(
+      (r) => r.registeredAt && new Date(r.registeredAt).getTime() >= startOfToday.getTime()
+    ).length;
+
+    // Filter for table view
+    let allList = [...rawAll];
 
     // Sort by registeredAt desc
-    allList.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+    allList.sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
 
-    // Apply filter in memory if db query fallback
+    // Apply status filter
     if (statusFilter && statusFilter !== 'all') {
       allList = allList.filter((r) => r.paymentStatus === statusFilter);
     }
@@ -473,21 +424,6 @@ workshopRouter.get('/registrations', async (c) => {
         );
       });
     }
-
-    // Calculate KPI metrics across all (unfiltered) registrations
-    const rawAll = Array.from(regMap.values());
-    const totalRegistrations = rawAll.length;
-    const paidRegistrations = rawAll.filter((r) => r.paymentStatus === 'paid').length;
-    const pendingRegistrations = rawAll.filter((r) => r.paymentStatus === 'pending').length;
-    const totalRevenue = rawAll
-      .filter((r) => r.paymentStatus === 'paid')
-      .reduce((sum, r) => sum + (Number(r.amount) || 99), 0);
-
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const todayRegistrations = rawAll.filter(
-      (r) => new Date(r.registeredAt).getTime() >= startOfToday.getTime()
-    ).length;
 
     return c.json({
       success: true,
@@ -645,15 +581,22 @@ workshopRouter.delete('/registrations/:id', async (c) => {
 // -------------------------------------------------------------------
 workshopRouter.get('/export-csv', async (c) => {
   try {
-    let list: any[] = [];
+    const regMap = new Map<string, any>();
     if (isMongoConnected()) {
       try {
-        list = await WorkshopRegistrationModel.find({}).sort({ registeredAt: -1 }).lean();
+        const dbList = await WorkshopRegistrationModel.find({}).sort({ registeredAt: -1 }).lean();
+        for (const r of dbList) {
+          if (r.registrationId) regMap.set(r.registrationId, r);
+        }
       } catch (e) {}
     }
-    if (list.length === 0) {
-      list = Array.from(IN_MEMORY_REGISTRATIONS.values());
+    for (const [id, r] of IN_MEMORY_REGISTRATIONS.entries()) {
+      if (!regMap.has(id)) {
+        regMap.set(id, r);
+      }
     }
+    const list = Array.from(regMap.values());
+    list.sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
 
     const headers = [
       'Registration ID',
@@ -678,7 +621,7 @@ workshopRouter.get('/export-csv', async (c) => {
       `"${(r.schoolName || '').replace(/"/g, '""')}"`,
       `"${(r.grade || '').replace(/"/g, '""')}"`,
       `"${(r.city || '').replace(/"/g, '""')}"`,
-      r.amount || 99,
+      r.amount !== undefined ? r.amount : 99,
       r.paymentStatus,
       r.razorpayPaymentId || 'N/A',
       r.registeredAt ? new Date(r.registeredAt).toLocaleString('en-IN') : '',
