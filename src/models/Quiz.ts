@@ -10,6 +10,7 @@ export interface IQuestion {
 }
 
 export interface IQuiz extends Document {
+  _id: string;
   title: string;
   subject: string;
   grade: string;
@@ -32,18 +33,24 @@ const QuestionSchema = new Schema<IQuestion>({
   marks: { type: Number, default: 1 },
 });
 
-const QuizSchema = new Schema<IQuiz>({
-  title: { type: String, required: true },
-  subject: { type: String, required: true },
-  grade: { type: String, required: true },
-  description: { type: String, default: '' },
-  durationMinutes: { type: Number, default: 15 },
-  totalMarks: { type: Number, required: true },
-  passingMarks: { type: Number, required: true },
-  dueDate: { type: String, required: true },
-  questions: [QuestionSchema],
-  createdDate: { type: String, default: () => new Date().toISOString() },
-  status: { type: String, enum: ['active', 'archived'], default: 'active' },
-});
+const QuizSchema = new Schema<IQuiz>(
+  {
+    _id: { type: String, required: true },
+    title: { type: String, required: true },
+    subject: { type: String, required: true },
+    grade: { type: String, required: true },
+    description: { type: String, default: '' },
+    durationMinutes: { type: Number, default: 15 },
+    totalMarks: { type: Number, required: true },
+    passingMarks: { type: Number, required: true },
+    dueDate: { type: String, required: true },
+    questions: [QuestionSchema],
+    createdDate: { type: String, default: () => new Date().toISOString() },
+    status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  },
+  { _id: false }
+);
 
-export const QuizModel = mongoose.model<IQuiz>('Quiz', QuizSchema);
+export const QuizModel =
+  mongoose.models.Quiz ||
+  mongoose.model<IQuiz>('Quiz', QuizSchema);

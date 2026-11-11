@@ -4,6 +4,10 @@ import { SEED_DATA } from '../data/seedData.js';
 import { ENV } from '../config/env.js';
 import { StudentModel } from '../models/Student.js';
 import { AttendanceModel } from '../models/Attendance.js';
+import { AssignmentModel } from '../models/Assignment.js';
+import { CourseMaterialModel } from '../models/CourseMaterial.js';
+import { VideoLectureModel } from '../models/VideoLecture.js';
+import { QuizModel } from '../models/Quiz.js';
 import { isMongoConnected } from '../db/mongo.js';
 import {
   sendDirectWhatsAppMessage,
@@ -257,6 +261,26 @@ adminRouter.get('/overview', async (c) => {
     ? Math.round(students.reduce((acc, s) => acc + (s.attendanceRate || 0), 0) / totalStudents)
     : 100;
 
+  let totalAssignments = SEED_DATA.assignments.length;
+  let totalNotes = SEED_DATA.courseMaterials.length;
+  let totalVideos = SEED_DATA.videos.length;
+  let totalQuizzes = SEED_DATA.quizzes.length;
+
+  if (isMongoConnected()) {
+    try {
+      const [aCount, nCount, vCount, qCount] = await Promise.all([
+        AssignmentModel.countDocuments(),
+        CourseMaterialModel.countDocuments(),
+        VideoLectureModel.countDocuments(),
+        QuizModel.countDocuments(),
+      ]);
+      if (aCount > totalAssignments) totalAssignments = aCount;
+      if (nCount > totalNotes) totalNotes = nCount;
+      if (vCount > totalVideos) totalVideos = vCount;
+      if (qCount > totalQuizzes) totalQuizzes = qCount;
+    } catch (e) {}
+  }
+
   return c.json({
     success: true,
     data: {
@@ -270,9 +294,10 @@ adminRouter.get('/overview', async (c) => {
         'Cohort Beta (AI & Robotics)',
         'Cohort Gamma (Young Coders Weekend)',
       ],
-      totalAssignments: SEED_DATA.assignments.length,
-      totalNotes: SEED_DATA.courseMaterials.length,
-      totalVideos: SEED_DATA.videos.length,
+      totalAssignments,
+      totalNotes,
+      totalVideos,
+      totalQuizzes,
       totalTemplates: NOTIFICATION_TEMPLATES.length,
     },
   });

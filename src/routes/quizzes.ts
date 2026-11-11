@@ -13,10 +13,17 @@ quizzesRouter.get('/', async (c) => {
 
   if (isMongoConnected()) {
     try {
-      const mongoQuizzes = await QuizModel.find({ status: 'active' });
-      if (mongoQuizzes.length > 0) quizzes = mongoQuizzes as any;
-    } catch (e) {
-      console.warn('Quizzes Mongo fallback:', e);
+      const mongoQuizzes = await QuizModel.find({ status: 'active' }).lean();
+      if (mongoQuizzes && mongoQuizzes.length > 0) {
+        const map = new Map<string, any>();
+        for (const q of mongoQuizzes) map.set(q._id, q);
+        for (const q of SEED_DATA.quizzes) {
+          if (!map.has(q._id)) map.set(q._id, q);
+        }
+        quizzes = Array.from(map.values());
+      }
+    } catch (e: any) {
+      console.warn('Quizzes Mongo fallback:', e.message);
     }
   }
 
@@ -31,7 +38,7 @@ quizzesRouter.get('/', async (c) => {
     totalMarks: q.totalMarks,
     passingMarks: q.passingMarks,
     dueDate: q.dueDate,
-    questionCount: q.questions.length,
+    questionCount: q.questions?.length || 0,
   }));
 
   return c.json({ success: true, data: sanitized });
@@ -80,8 +87,8 @@ quizzesRouter.get('/:id', async (c) => {
   });
 });
 
-// 3. Admin upload new Question & Answer task
-quizzesRouter.post('/admin/create', async (c) => {
+// 3. Admin upload new Question & Answer task (supports both /admin/create and /)
+const handleCreateQuiz = async (c: any) => {
   try {
     const body = await c.req.json();
     const { title, subject, grade, description, durationMinutes, passingMarks, questions } = body;
@@ -95,10 +102,10 @@ quizzesRouter.post('/admin/create', async (c) => {
 
     const newQuiz: any = {
       _id: newQuizId,
-      title,
-      subject,
-      grade: grade || 'AI & GenAI Master Track',
-      description: description || '',
+      title: title.trim(),
+      subject: subject.trim(),
+      grade: (grade || 'AI & GenAI Master Track').trim(),
+      description: (description || '').trim(),
       durationMinutes: Number(durationMinutes) || 15,
       totalMarks,
       passingMarks: Number(passingMarks) || Math.round(totalMarks * 0.5),
@@ -133,7 +140,10 @@ quizzesRouter.post('/admin/create', async (c) => {
   } catch (error: any) {
     return c.json({ success: false, message: error.message }, 500);
   }
-});
+};
+
+quizzesRouter.post('/admin/create', handleCreateQuiz);
+quizzesRouter.post('/', handleCreateQuiz);
 
 // 4. Student submits quiz -> Auto score -> SEND PARENT WHATSAPP & EMAIL NOTIFICATION
 quizzesRouter.post('/:id/submit', async (c) => {
@@ -304,7 +314,7 @@ quizzesRouter.delete('/:id', async (c) => {
     }
     if (isMongoConnected()) {
       try {
-        await QuizModel.findByIdAndDelete(id);
+        await QuizModel.deleteOne({ _id: id });
       } catch (err: any) {
         console.warn('Quiz Mongo delete warning:', err.message);
       }

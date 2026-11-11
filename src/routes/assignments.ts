@@ -10,10 +10,17 @@ assignmentsRouter.get('/', async (c) => {
 
   if (isMongoConnected()) {
     try {
-      const mongoList = await AssignmentModel.find();
-      if (mongoList.length > 0) list = mongoList as any;
-    } catch (e) {
-      console.warn('Assignments Mongo fallback:', e);
+      const mongoList = await AssignmentModel.find().lean();
+      if (mongoList && mongoList.length > 0) {
+        const map = new Map<string, any>();
+        for (const a of mongoList) map.set(a._id, a);
+        for (const a of SEED_DATA.assignments) {
+          if (!map.has(a._id)) map.set(a._id, a);
+        }
+        list = Array.from(map.values());
+      }
+    } catch (e: any) {
+      console.warn('Assignments Mongo fallback:', e.message);
     }
   }
 
@@ -140,7 +147,7 @@ assignmentsRouter.delete('/:id', async (c) => {
     }
     if (isMongoConnected()) {
       try {
-        await AssignmentModel.findByIdAndDelete(id);
+        await AssignmentModel.deleteOne({ _id: id });
       } catch (err: any) {
         console.warn('Assignment Mongo delete warning:', err.message);
       }

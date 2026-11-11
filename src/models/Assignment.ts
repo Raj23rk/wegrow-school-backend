@@ -13,6 +13,7 @@ export interface IAssignmentSubmission {
 }
 
 export interface IAssignment extends Document {
+  _id: string;
   title: string;
   subject: string;
   grade: string;
@@ -35,15 +36,21 @@ const AssignmentSubmissionSchema = new Schema<IAssignmentSubmission>({
   status: { type: String, enum: ['submitted', 'graded'], default: 'submitted' },
 });
 
-const AssignmentSchema = new Schema<IAssignment>({
-  title: { type: String, required: true },
-  subject: { type: String, required: true },
-  grade: { type: String, required: true },
-  description: { type: String, required: true },
-  assignedDate: { type: String, required: true },
-  dueDate: { type: String, required: true },
-  totalMarks: { type: Number, default: 100 },
-  submissions: [AssignmentSubmissionSchema],
-});
+const AssignmentSchema = new Schema<IAssignment>(
+  {
+    _id: { type: String, required: true },
+    title: { type: String, required: true },
+    subject: { type: String, required: true },
+    grade: { type: String, required: true },
+    description: { type: String, required: true },
+    assignedDate: { type: String, required: true },
+    dueDate: { type: String, required: true },
+    totalMarks: { type: Number, default: 100 },
+    submissions: [AssignmentSubmissionSchema],
+  },
+  { _id: false }
+);
 
-export const AssignmentModel = mongoose.model<IAssignment>('Assignment', AssignmentSchema);
+export const AssignmentModel =
+  mongoose.models.Assignment ||
+  mongoose.model<IAssignment>('Assignment', AssignmentSchema);

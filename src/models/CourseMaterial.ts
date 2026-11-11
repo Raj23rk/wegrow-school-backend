@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface ICourseMaterial extends Document {
+  _id: string;
   title: string;
   subject: string;
   grade: string;
@@ -14,18 +15,24 @@ export interface ICourseMaterial extends Document {
   views: number;
 }
 
-const CourseMaterialSchema = new Schema<ICourseMaterial>({
-  title: { type: String, required: true },
-  subject: { type: String, required: true },
-  grade: { type: String, required: true },
-  date: { type: String, required: true },
-  teacher: { type: String, required: true },
-  summary: { type: String, required: true },
-  content: { type: String, required: true },
-  pdfUrl: { type: String },
-  downloadRestricted: { type: Boolean, default: false },
-  tags: [{ type: String }],
-  views: { type: Number, default: 0 },
-});
+const CourseMaterialSchema = new Schema<ICourseMaterial>(
+  {
+    _id: { type: String, required: true },
+    title: { type: String, required: true },
+    subject: { type: String, required: true },
+    grade: { type: String, required: true },
+    date: { type: String, required: true },
+    teacher: { type: String, required: true },
+    summary: { type: String, required: true },
+    content: { type: String, required: true },
+    pdfUrl: { type: String },
+    downloadRestricted: { type: Boolean, default: false },
+    tags: [{ type: String }],
+    views: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
 
-export const CourseMaterialModel = mongoose.model<ICourseMaterial>('CourseMaterial', CourseMaterialSchema);
+export const CourseMaterialModel =
+  mongoose.models.CourseMaterial ||
+  mongoose.model<ICourseMaterial>('CourseMaterial', CourseMaterialSchema);
